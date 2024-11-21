@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/cookiejar"
@@ -20,12 +22,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	signer "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/aws-sdk-go/aws/endpoints"
-	"github.com/aws/aws-sdk-go/aws/session"
-	v4 "github.com/aws/aws-sdk-go/aws/signer/v4"
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/net/publicsuffix"
@@ -82,7 +84,7 @@ type proxy struct {
 	nosignreq       bool
 	fileRequest     *os.File
 	fileResponse    *os.File
-	credentials     *credentials.Credentials
+	credentials     aws.CredentialsProvider
 	httpClient      *http.Client
 	auth            bool
 	username        string
@@ -90,6 +92,7 @@ type proxy struct {
 	realm           string
 	remoteTerminate bool
 	assumeRole      string
+	profile         string
 }
 
 func newProxy(args ...interface{}) *proxy {
@@ -122,6 +125,7 @@ func newProxy(args ...interface{}) *proxy {
 		realm:           args[9].(string),
 		remoteTerminate: args[10].(bool),
 		assumeRole:      args[11].(string),
+		profile:         args[12].(string),
 	}
 }
 
@@ -195,43 +199,34 @@ func (p *proxy) parseEndpoint() error {
 	return nil
 }
 
-func (p *proxy) getSigner() *v4.Signer {
-	// Refresh credentials after expiration. Required for STS
+func (p *proxy) getSigner() *signer.Signer {
 	if p.credentials == nil {
-		sess, err := session.NewSession(
-			&aws.Config{
-				Region:                        aws.String(p.region),
-				CredentialsChainVerboseErrors: aws.Bool(true),
-			},
+		cfg, err := config.LoadDefaultConfig(context.TODO(),
+			config.WithRegion(p.region),
+			config.WithSharedConfigProfile(p.profile),
 		)
 		if err != nil {
-			logrus.Debugln(err)
+			logrus.Errorln(err)
 		}
 
-		awsRoleARN := os.Getenv("AWS_ROLE_ARN")
-		awsWebIdentityTokenFile := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
-
-		var creds *credentials.Credentials
-		if awsRoleARN != "" && awsWebIdentityTokenFile != "" {
-			logrus.Infof("Using web identity credentials with role %s", awsRoleARN)
-			creds = stscreds.NewWebIdentityCredentials(sess, awsRoleARN, "", awsWebIdentityTokenFile)
+		if awsRoleARN := os.Getenv("AWS_ROLE_ARN"); awsRoleARN != "" {
+			creds := stscreds.NewAssumeRoleProvider(sts.NewFromConfig(cfg), awsRoleARN)
+			p.credentials = creds
 		} else if p.assumeRole != "" {
-			logrus.Infof("Assuming credentials from %s", p.assumeRole)
-			creds = stscreds.NewCredentials(sess, p.assumeRole, func(provider *stscreds.AssumeRoleProvider) {
-				provider.Duration = 17 * time.Minute
-				provider.ExpiryWindow = 13 * time.Minute
-				provider.MaxJitterFrac = 0.1
-			})
+			creds := stscreds.NewAssumeRoleProvider(sts.NewFromConfig(cfg), p.assumeRole)
+			p.credentials = creds
 		} else {
 			logrus.Infoln("Using default credentials")
-			creds = sess.Config.Credentials
+			p.credentials = cfg.Credentials
 		}
-
-		p.credentials = creds
-		logrus.Infoln("Generated fresh AWS Credentials object")
+		if p.profile != "" {
+			logrus.Infof("Generated fresh AWS Credentials object with profile %s", p.profile)
+		} else {
+			logrus.Infoln("Generated fresh AWS Credentials object")
+		}
 	}
 
-	return v4.NewSigner(p.credentials)
+	return signer.NewSigner()
 }
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -282,12 +277,10 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Make signV4 optional
 	if !p.nosignreq {
-		// Start AWS session from ENV, Shared Creds or EC2Role
 		signer := p.getSigner()
-
-		// Sign the request with AWSv4
-		payload := bytes.NewReader(replaceBody(req))
-		_, err := signer.Sign(req, payload, p.service, p.region, time.Now())
+		creds, _ := p.credentials.Retrieve(context.Background())
+		body := sha256.Sum256(replaceBody(req))
+		err := signer.SignHTTP(context.Background(), creds, req, hex.EncodeToString(body[:]), p.service, p.region, time.Now())
 		if err != nil {
 			p.credentials = nil
 			logrus.Errorln("Failed to sign", err)
@@ -372,7 +365,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fmt.Println("Status: ", resp.StatusCode)
 			fmt.Printf("Took: %.3fs\n", requestEnded.Seconds())
 			fmt.Println("Body: ")
-			fmt.Println(string(prettyBody.Bytes()))
+			fmt.Println(prettyBody.String())
 		} else {
 			log.Printf(" -> %s; %s; %s; %s; %d; %.3fs\n",
 				r.Method, r.RemoteAddr,
@@ -398,7 +391,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		respStruct := &responseStruct{
 			Requestid: requestID,
-			Body:      string(body.Bytes()),
+			Body:      body.String(),
 		}
 
 		y, _ := json.Marshal(reqStruct)
@@ -448,8 +441,8 @@ func replaceBody(req *http.Request) []byte {
 	if req.Body == nil {
 		return []byte{}
 	}
-	payload, _ := ioutil.ReadAll(req.Body)
-	req.Body = ioutil.NopCloser(bytes.NewReader(payload))
+	payload, _ := io.ReadAll(req.Body)
+	req.Body = io.NopCloser(bytes.NewReader(payload))
 	return payload
 }
 
@@ -485,6 +478,7 @@ func main() {
 		timeout         int
 		remoteTerminate bool
 		assumeRole      string
+		profile         string
 	)
 
 	flag.StringVar(&endpoint, "endpoint", "", "Amazon ElasticSearch Endpoint (e.g: https://dummy-host.eu-west-1.es.amazonaws.com)")
@@ -502,6 +496,7 @@ func main() {
 	flag.StringVar(&realm, "realm", "", "Authentication Required")
 	flag.BoolVar(&remoteTerminate, "remote-terminate", false, "Allow HTTP remote termination")
 	flag.StringVar(&assumeRole, "assume", "", "Optionally specify role to assume")
+	flag.StringVar(&profile, "profile", "", "Optionally specify profile to use")
 	flag.Parse()
 
 	if endpoint == "" {
@@ -549,6 +544,7 @@ func main() {
 		realm,
 		remoteTerminate,
 		assumeRole,
+		profile,
 	)
 
 	if err = p.parseEndpoint(); err != nil {

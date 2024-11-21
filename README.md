@@ -40,10 +40,10 @@ brew install aws-es-proxy
 ### Build from Source
 
 #### Dependencies:
-* go1.14+
+* go1.23+
 
 ```sh
-#requires go1.14
+#requires go1.23
 go build github.com/abutaha/aws-es-proxy
 ```
 
@@ -140,6 +140,8 @@ Usage of ./aws-es-proxy:
         HTTP Basic Auth Password
   -pretty
         Prettify verbose and file output
+  -profile
+        Use a shared profile in order to access the ES/OS resource
   -realm string
         Authentication Required
   -remote-terminate
@@ -160,3 +162,29 @@ Usage of ./aws-es-proxy:
 After you run *aws-es-proxy*, you can now open your Web browser on [http://localhost:9200](http://localhost:9200). Everything should be working as you have your own instance of ElasticSearch running on port 9200.
 
 To access Kibana, use [http://localhost:9200/_plugin/kibana/app/kibana](http://localhost:9200/_plugin/kibana/app/kibana)
+
+## Using AWS Profile
+
+You can use `AWS_PROFILE` environment variable defined directly in AWS Go SDK V2 in order to set which profile to use.
+
+```text
+[default]
+sso_start_url=https://<URL>/start
+sso_region=eu-west-1
+sso_role_name = sso-role
+sso_account_id = 1234567890
+region=us-east-1
+
+[main]
+sso_start_url=https://<URL>/start
+sso_region=eu-west-1
+sso_role_name = sso-role
+sso_account_id = 1234567890
+region=us-east-1
+```
+
+Example:
+
+```bash
+./aws-es-proxy -endpoint https://dummy-host.eu-west-1.es.amazonaws.com -profile main
+```
