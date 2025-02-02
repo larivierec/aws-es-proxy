@@ -27,14 +27,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/net/publicsuffix"
 )
 
 func logger(debug bool) {
-
 	formatFilePath := func(path string) string {
 		arr := strings.Split(path, "/")
 		return arr[len(arr)-1]
@@ -80,8 +78,8 @@ type proxy struct {
 	endpoint        string
 	verbose         bool
 	prettify        bool
-	logtofile       bool
-	nosignreq       bool
+	logToFile       bool
+	noSignReq       bool
 	fileRequest     *os.File
 	fileResponse    *os.File
 	credentials     aws.CredentialsProvider
@@ -116,8 +114,8 @@ func newProxy(args ...interface{}) *proxy {
 		endpoint:        args[0].(string),
 		verbose:         args[1].(bool),
 		prettify:        args[2].(bool),
-		logtofile:       args[3].(bool),
-		nosignreq:       args[4].(bool),
+		logToFile:       args[3].(bool),
+		noSignReq:       args[4].(bool),
 		httpClient:      &client,
 		auth:            args[6].(bool),
 		username:        args[7].(string),
@@ -131,9 +129,8 @@ func newProxy(args ...interface{}) *proxy {
 
 func (p *proxy) parseEndpoint() error {
 	var (
-		link          *url.URL
-		err           error
-		isAWSEndpoint bool
+		link *url.URL
+		err  error
 	)
 
 	if link, err = url.Parse(p.endpoint); err != nil {
@@ -163,7 +160,7 @@ func (p *proxy) parseEndpoint() error {
 	p.host = link.Host
 
 	// AWS SignV4 enabled, extract required parts for signing process
-	if !p.nosignreq {
+	if !p.noSignReq {
 
 		split := strings.SplitAfterN(link.Hostname(), ".", 2)
 
@@ -171,25 +168,20 @@ func (p *proxy) parseEndpoint() error {
 			logrus.Debugln("Endpoint split is less than 2")
 		}
 
-		awsEndpoints := []string{}
-		for _, partition := range endpoints.DefaultPartitions() {
-			for region := range partition.Regions() {
-				awsEndpoints = append(awsEndpoints, fmt.Sprintf("%s.es.%s", region, partition.DNSSuffix()))
-				awsEndpoints = append(awsEndpoints, fmt.Sprintf("%s.aoss.%s", region, partition.DNSSuffix()))
-			}
-		}
+		isAWSEndpoint := strings.HasSuffix(link.Hostname(), ".es.amazonaws.com") || strings.HasSuffix(link.Hostname(), ".aoss.amazonaws.com")
+		if isAWSEndpoint {
+			logrus.Debugln("Provided endpoint is a valid AWS Elasticsearch or AOSS endpoint")
 
-		isAWSEndpoint = false
-		for _, v := range awsEndpoints {
-			if split[1] == v {
-				logrus.Debugln("Provided endpoint is a valid AWS Elasticsearch endpoint")
-				isAWSEndpoint = true
-				break
-			}
+			// Extract region and service from link. This should be safe now
+			parts := strings.Split(link.Host, ".")
+			p.region, p.service = parts[1], parts[2]
+			logrus.Debugln("AWS Region", p.region)
 		}
 
 		if isAWSEndpoint {
-			// Extract region and service from link. This should be save now
+			logrus.Debugln("Provided endpoint is a valid AWS Elasticsearch or AOSS endpoint")
+
+			// Extract region and service from link. This should be safe now
 			parts := strings.Split(link.Host, ".")
 			p.region, p.service = parts[1], parts[2]
 			logrus.Debugln("AWS Region", p.region)
@@ -276,7 +268,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	addHeaders(r.Header, req.Header)
 
 	// Make signV4 optional
-	if !p.nosignreq {
+	if !p.noSignReq {
 		signer := p.getSigner()
 		creds, _ := p.credentials.Retrieve(context.Background())
 		body := sha256.Sum256(replaceBody(req))
@@ -296,7 +288,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !p.nosignreq {
+	if !p.noSignReq {
 		// AWS credentials expired, need to generate fresh ones
 		if resp.StatusCode == 403 {
 			logrus.Errorln("Received 403 from AWSAuth, invalidating credentials for retrial")
@@ -310,7 +302,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			logrus.Debugln("Received headers from AWS:", resp.Header)
-			logrus.Debugln("Received body from AWS:", string(b.Bytes()))
+			logrus.Debugln("Received body from AWS:", b.String())
 		}
 	}
 
@@ -374,8 +366,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if p.logtofile {
-
+	if p.logToFile {
 		requestID := primitive.NewObjectID().Hex()
 
 		reqStruct := &requestStruct{
@@ -400,9 +391,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.fileRequest.WriteString("\n")
 		p.fileResponse.Write(z)
 		p.fileResponse.WriteString("\n")
-
 	}
-
 }
 
 // Recent versions of ES/Kibana require
@@ -453,11 +442,22 @@ func copyHeaders(dst, src http.Header) {
 				dst.Add(k, v)
 			}
 		}
-
 	}
 }
 
+const banner = `
+aws-es-proxy
+version: %s (%s)
+
+`
+
+var (
+	Version = "local"
+	Gitsha  = "?"
+)
+
 func main() {
+	fmt.Printf(banner, Version, Gitsha)
 
 	var (
 		debug           bool
@@ -467,8 +467,8 @@ func main() {
 		realm           string
 		verbose         bool
 		prettify        bool
-		logtofile       bool
-		nosignreq       bool
+		logToFile       bool
+		noSignReq       bool
 		ver             bool
 		endpoint        string
 		listenAddress   string
@@ -484,9 +484,9 @@ func main() {
 	flag.StringVar(&endpoint, "endpoint", "", "Amazon ElasticSearch Endpoint (e.g: https://dummy-host.eu-west-1.es.amazonaws.com)")
 	flag.StringVar(&listenAddress, "listen", "127.0.0.1:9200", "Local TCP port to listen on")
 	flag.BoolVar(&verbose, "verbose", false, "Print user requests")
-	flag.BoolVar(&logtofile, "log-to-file", false, "Log user requests and ElasticSearch responses to files")
+	flag.BoolVar(&logToFile, "log-to-file", false, "Log user requests and ElasticSearch responses to files")
 	flag.BoolVar(&prettify, "pretty", false, "Prettify verbose and file output")
-	flag.BoolVar(&nosignreq, "no-sign-reqs", false, "Disable AWS Signature v4")
+	flag.BoolVar(&noSignReq, "no-sign-reqs", false, "Disable AWS Signature v4")
 	flag.BoolVar(&debug, "debug", false, "Print debug messages")
 	flag.BoolVar(&ver, "version", false, "Print aws-es-proxy version")
 	flag.IntVar(&timeout, "timeout", 15, "Set a request timeout to ES. Specify in seconds, defaults to 15")
@@ -535,8 +535,8 @@ func main() {
 		endpoint,
 		verbose,
 		prettify,
-		logtofile,
-		nosignreq,
+		logToFile,
+		noSignReq,
 		timeout,
 		auth,
 		username,
@@ -552,7 +552,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if p.logtofile {
+	if p.logToFile {
 
 		requestFname := fmt.Sprintf("request-%s.log", primitive.NewObjectID().Hex())
 		if fileRequest, err = os.Create(requestFname); err != nil {
