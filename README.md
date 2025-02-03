@@ -1,7 +1,5 @@
 # aws-es-proxy
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/abutaha/aws-es-proxy.svg)](https://hub.docker.com/r/abutaha/aws-es-proxy/)
-
 **aws-es-proxy** is a small web server application sitting between your HTTP client (browser, curl, etc...) and Amazon Elasticsearch service. It will sign your requests using latest [AWS Signature Version 4](http://docs.aws.amazon.com/general/latest/gr/signature-version-4.html) before sending the request to Amazon Elasticsearch. When response is back from Amazon Elasticsearch, this response will be sent back to your HTTP client.
 
 Kibana requests are also signed automatically.
@@ -12,7 +10,7 @@ Kibana requests are also signed automatically.
 
 **aws-es-proxy** has single executable binaries for Linux, Mac and Windows.
 
-Download the latest [aws-es-proxy release](https://github.com/abutaha/aws-es-proxy/releases/).
+Download the latest [aws-es-proxy release](https://github.com/larivierec/aws-es-proxy/releases/).
 
 ### Docker
 
@@ -21,11 +19,11 @@ There is an official docker image available for aws-es-proxy. To run the image:
 ```sh
 # v0.9 and newer (latest always point to the latest release):
 
-docker run --rm -v ~/.aws:/root/.aws -p 9200:9200 abutaha/aws-es-proxy:v1.0 -endpoint https://dummy-host.ap-southeast-2.es.amazonaws.com -listen 0.0.0.0:9200
+docker run --rm -v ~/.aws:/root/.aws -p 9200:9200 larivierec/aws-es-proxy:v1.0 -endpoint https://dummy-host.ap-southeast-2.es.amazonaws.com -listen 0.0.0.0:9200
 
 v.08:
 
-docker run --rm -it abutaha/aws-es-proxy ./aws-es-proxy -endpoint https://dummy-host.ap-southeast-2.es.amazonaws.com
+docker run --rm -it larivierec/aws-es-proxy ./aws-es-proxy -endpoint https://dummy-host.ap-southeast-2.es.amazonaws.com
 
 ```
 
@@ -40,11 +38,12 @@ brew install aws-es-proxy
 ### Build from Source
 
 #### Dependencies:
-* go1.14+
+* go1.23+
 
 ```sh
-#requires go1.14
-go build github.com/abutaha/aws-es-proxy
+
+#requires go1.23
+go build github.com/larivierec/aws-es-proxy
 ```
 
 ## Configuring Credentials
@@ -140,6 +139,8 @@ Usage of ./aws-es-proxy:
         HTTP Basic Auth Password
   -pretty
         Prettify verbose and file output
+  -profile
+        Use a shared profile in order to access the ES/OS resource
   -realm string
         Authentication Required
   -remote-terminate
@@ -160,3 +161,30 @@ Usage of ./aws-es-proxy:
 After you run *aws-es-proxy*, you can now open your Web browser on [http://localhost:9200](http://localhost:9200). Everything should be working as you have your own instance of ElasticSearch running on port 9200.
 
 To access Kibana, use [http://localhost:9200/_plugin/kibana/app/kibana](http://localhost:9200/_plugin/kibana/app/kibana)
+
+## Using AWS Profile
+
+You can use `AWS_PROFILE` environment variable defined directly in AWS Go SDK V2 in order to set which profile to use.
+
+```text
+[default]
+sso_start_url=https://<URL>/start
+sso_region=eu-west-1
+sso_role_name = sso-role
+sso_account_id = 1234567890
+region=us-east-1
+
+[main]
+sso_start_url=https://<URL>/start
+sso_region=eu-west-1
+sso_role_name = sso-role
+sso_account_id = 1234567890
+region=us-east-1
+source_profile=default
+```
+
+Example:
+
+```bash
+./aws-es-proxy -endpoint https://dummy-host.eu-west-1.es.amazonaws.com -profile main
+```
