@@ -28,7 +28,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/sirupsen/logrus"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -367,7 +367,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p.logToFile {
-		requestID := primitive.NewObjectID().Hex()
+		requestID := bson.NewObjectID().Hex()
 
 		reqStruct := &requestStruct{
 			Requestid:  requestID,
@@ -553,14 +553,13 @@ func main() {
 	}
 
 	if p.logToFile {
-
-		requestFname := fmt.Sprintf("request-%s.log", primitive.NewObjectID().Hex())
+		requestFname := fmt.Sprintf("request-%s.log", bson.NewObjectID().Hex())
 		if fileRequest, err = os.Create(requestFname); err != nil {
 			log.Fatalln(err.Error())
 		}
 		defer fileRequest.Close()
 
-		responseFname := fmt.Sprintf("response-%s.log", primitive.NewObjectID().Hex())
+		responseFname := fmt.Sprintf("response-%s.log", bson.NewObjectID().Hex())
 		if fileResponse, err = os.Create(responseFname); err != nil {
 			log.Fatalln(err.Error())
 		}
