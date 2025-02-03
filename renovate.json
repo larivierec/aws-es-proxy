@@ -14,16 +14,11 @@
   ],
   "dependencyDashboard": true,
   "dependencyDashboardTitle": "Renovate Dashboard 🤖",
-  "forkProcessing": "enabled"
+  "forkProcessing": "enabled",
   "forkModeDisallowMaintainerEdits": true,
   "includeForks": true,
   "suppressNotifications": ["prIgnoreNotification"],
   "rebaseWhen": "conflicted",
-  "assignees": [
-    "larivierec"
-  ],
-  "postUpdateOptions": [
-    "gomodTidy",
-    "gomodUpdateImportPaths"
-  ]
+  "assignees": ["larivierec"],
+  "postUpdateOptions": ["gomodTidy", "gomodUpdateImportPaths"]
 }
