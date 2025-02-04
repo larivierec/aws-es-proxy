@@ -6,9 +6,9 @@ toolchain go1.23.6
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.0
-	github.com/aws/aws-sdk-go-v2/config v1.29.4
-	github.com/aws/aws-sdk-go-v2/credentials v1.17.57
-	github.com/aws/aws-sdk-go-v2/service/sts v1.33.12
+	github.com/aws/aws-sdk-go-v2/config v1.29.5
+	github.com/aws/aws-sdk-go-v2/credentials v1.17.58
+	github.com/aws/aws-sdk-go-v2/service/sts v1.33.13
 	github.com/sirupsen/logrus v1.9.3
 	go.mongodb.org/mongo-driver/v2 v2.0.0
 	golang.org/x/net v0.34.0
