@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:base",
+    "config:recommended",
     "docker:enableMajor",
     ":disableRateLimiting",
     ":dependencyDashboard",
@@ -16,9 +16,15 @@
   "dependencyDashboardTitle": "Renovate Dashboard 🤖",
   "forkProcessing": "enabled",
   "forkModeDisallowMaintainerEdits": true,
-  "includeForks": true,
-  "suppressNotifications": ["prIgnoreNotification"],
+  "suppressNotifications": [
+    "prIgnoreNotification"
+  ],
   "rebaseWhen": "conflicted",
-  "assignees": ["larivierec"],
-  "postUpdateOptions": ["gomodTidy", "gomodUpdateImportPaths"]
+  "assignees": [
+    "larivierec"
+  ],
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ]
 }
