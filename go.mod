@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.19
 	github.com/sirupsen/logrus v1.9.3
 	go.mongodb.org/mongo-driver/v2 v2.2.1
-	golang.org/x/net v0.40.0
+	golang.org/x/net v0.41.0
 )
 
 require (
