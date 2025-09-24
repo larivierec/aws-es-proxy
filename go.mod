@@ -1,6 +1,6 @@
 module github.com/larivierec/aws-es-proxy
 
-go 1.24.0
+go 1.25
 
 toolchain go1.25.1
 
@@ -9,8 +9,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.31.10
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.14
 	github.com/aws/aws-sdk-go-v2/service/sts v1.38.5
-	github.com/sirupsen/logrus v1.9.3
 	go.mongodb.org/mongo-driver/v2 v2.3.0
+	go.uber.org/zap v1.27.0
 	golang.org/x/net v0.44.0
 )
 
@@ -24,5 +24,5 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.29.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.0 // indirect
 	github.com/aws/smithy-go v1.23.0 // indirect
-	golang.org/x/sys v0.36.0 // indirect
+	go.uber.org/multierr v1.10.0 // indirect
 )

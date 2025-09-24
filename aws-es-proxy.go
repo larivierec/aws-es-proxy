@@ -18,7 +18,6 @@ import (
 	"os"
 	"path"
 	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -27,31 +26,39 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/net/publicsuffix"
 )
 
-func logger(debug bool) {
-	formatFilePath := func(path string) string {
-		arr := strings.Split(path, "/")
-		return arr[len(arr)-1]
-	}
+var logger *zap.SugaredLogger
+
+func initLogger(debug bool) {
+	var zapLogger *zap.Logger
+	var err error
+
+	config := zap.NewProductionConfig()
+	config.EncoderConfig.TimeKey = "timestamp"
+	config.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-02-01 15:04:05")
+	config.EncoderConfig.CallerKey = "caller"
+	config.EncoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
 
 	if debug {
-		logrus.SetLevel(logrus.DebugLevel)
-		// logrus.SetReportCaller(true)
+		config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+		config.Development = true
+		config.Encoding = "console"
+		config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	} else {
+		config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
 	}
 
-	formatter := &logrus.TextFormatter{
-		TimestampFormat:        "2006-02-01 15:04:05",
-		FullTimestamp:          true,
-		DisableLevelTruncation: false,
-		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
-			return "", fmt.Sprintf("%s:%d", formatFilePath(f.File), f.Line)
-		},
+	zapLogger, err = config.Build(zap.AddCaller())
+	if err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
 	}
-	logrus.SetFormatter(formatter)
+
+	logger = zapLogger.Sugar()
 }
 
 type requestStruct struct {
@@ -165,26 +172,26 @@ func (p *proxy) parseEndpoint() error {
 		split := strings.SplitAfterN(link.Hostname(), ".", 2)
 
 		if len(split) < 2 {
-			logrus.Debugln("Endpoint split is less than 2")
+			logger.Debug("Endpoint split is less than 2")
 		}
 
 		isAWSEndpoint := strings.HasSuffix(link.Hostname(), ".es.amazonaws.com") || strings.HasSuffix(link.Hostname(), ".aoss.amazonaws.com")
 		if isAWSEndpoint {
-			logrus.Debugln("Provided endpoint is a valid AWS Elasticsearch or AOSS endpoint")
+			logger.Debug("Provided endpoint is a valid AWS Elasticsearch or AOSS endpoint")
 
 			// Extract region and service from link. This should be safe now
 			parts := strings.Split(link.Host, ".")
 			p.region, p.service = parts[1], parts[2]
-			logrus.Debugln("AWS Region", p.region)
+			logger.Debug("AWS Region", p.region)
 		}
 
 		if isAWSEndpoint {
-			logrus.Debugln("Provided endpoint is a valid AWS Elasticsearch or AOSS endpoint")
+			logger.Debug("Provided endpoint is a valid AWS Elasticsearch or AOSS endpoint")
 
 			// Extract region and service from link. This should be safe now
 			parts := strings.Split(link.Host, ".")
 			p.region, p.service = parts[1], parts[2]
-			logrus.Debugln("AWS Region", p.region)
+			logger.Debug("AWS Region", p.region)
 		}
 	}
 
@@ -198,7 +205,7 @@ func (p *proxy) getSigner() *signer.Signer {
 			config.WithSharedConfigProfile(p.profile),
 		)
 		if err != nil {
-			logrus.Errorln(err)
+			logger.Error(err)
 		}
 
 		if awsRoleARN := os.Getenv("AWS_ROLE_ARN"); awsRoleARN != "" {
@@ -208,13 +215,13 @@ func (p *proxy) getSigner() *signer.Signer {
 			creds := stscreds.NewAssumeRoleProvider(sts.NewFromConfig(cfg), p.assumeRole)
 			p.credentials = creds
 		} else {
-			logrus.Infoln("Using default credentials")
+			logger.Info("Using default credentials")
 			p.credentials = cfg.Credentials
 		}
 		if p.profile != "" {
-			logrus.Infof("Generated fresh AWS Credentials object with profile %s", p.profile)
+			logger.Infof("Generated fresh AWS Credentials object with profile %s", p.profile)
 		} else {
-			logrus.Infoln("Generated fresh AWS Credentials object")
+			logger.Info("Generated fresh AWS Credentials object")
 		}
 	}
 
@@ -223,7 +230,7 @@ func (p *proxy) getSigner() *signer.Signer {
 
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.remoteTerminate && r.URL.Path == "/terminate-proxy" && r.Method == http.MethodPost {
-		logrus.Infoln("Terminate Signal")
+		logger.Info("Terminate Signal")
 		os.Exit(0)
 	}
 
@@ -247,7 +254,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if dump, err = httputil.DumpRequest(r, true); err != nil {
-		logrus.WithError(err).Errorln("Failed to dump request.")
+		logger.With("error", err).Error("Failed to dump request.")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -260,7 +267,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	proxied.Path = path.Clean(proxied.Path)
 
 	if req, err = http.NewRequest(r.Method, proxied.String(), r.Body); err != nil {
-		logrus.WithError(err).Errorln("Failed creating new request.")
+		logger.With("error", err).Error("Failed creating new request.")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -275,7 +282,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err := signer.SignHTTP(context.Background(), creds, req, hex.EncodeToString(body[:]), p.service, p.region, time.Now())
 		if err != nil {
 			p.credentials = nil
-			logrus.Errorln("Failed to sign", err)
+			logger.Error("Failed to sign", err)
 			http.Error(w, "Failed to sign", http.StatusForbidden)
 			return
 		}
@@ -283,7 +290,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		logrus.Errorln(err)
+		logger.Error(err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -291,18 +298,18 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !p.noSignReq {
 		// AWS credentials expired, need to generate fresh ones
 		if resp.StatusCode == 403 {
-			logrus.Errorln("Received 403 from AWSAuth, invalidating credentials for retrial")
+			logger.Error("Received 403 from AWSAuth, invalidating credentials for retrial")
 			p.credentials = nil
 
-			logrus.Debugln("Received Status code from AWS:", resp.StatusCode)
+			logger.Debug("Received Status code from AWS:", resp.StatusCode)
 			b := bytes.Buffer{}
 			if _, err := io.Copy(&b, resp.Body); err != nil {
-				logrus.WithError(err).Errorln("Failed to decode body")
+				logger.With("error", err).Error("Failed to decode body")
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			logrus.Debugln("Received headers from AWS:", resp.Header)
-			logrus.Debugln("Received body from AWS:", b.String())
+			logger.Debug("Received headers from AWS:", resp.Header)
+			logger.Debug("Received body from AWS:", b.String())
 		}
 	}
 
@@ -314,7 +321,7 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Send response back to requesting client
 	body := bytes.Buffer{}
 	if _, err := io.Copy(&body, resp.Body); err != nil {
-		logrus.Errorln(err)
+		logger.Error(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -511,15 +518,11 @@ func main() {
 		}
 	}
 
-	if debug {
-		logger(true)
-	} else {
-		logger(false)
-	}
+	initLogger(debug)
 
 	if ver {
 		version := 1.5
-		logrus.Infof("Current version is: v%.1f", version)
+		logger.Infof("Current version is: v%.1f", version)
 		os.Exit(0)
 	}
 
@@ -548,7 +551,7 @@ func main() {
 	)
 
 	if err = p.parseEndpoint(); err != nil {
-		logrus.Fatalln(err)
+		logger.Fatal(err)
 		os.Exit(1)
 	}
 
@@ -570,6 +573,6 @@ func main() {
 
 	}
 
-	logrus.Infof("Listening on %s...\n", listenAddress)
-	logrus.Fatalln(http.ListenAndServe(listenAddress, p))
+	logger.Infof("Listening on %s...\n", listenAddress)
+	logger.Fatal(http.ListenAndServe(listenAddress, p))
 }
