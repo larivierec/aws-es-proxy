@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.31.15
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.19
 	github.com/aws/aws-sdk-go-v2/service/sts v1.38.9
-	go.mongodb.org/mongo-driver/v2 v2.3.1
+	go.mongodb.org/mongo-driver/v2 v2.4.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/net v0.46.0
 )
