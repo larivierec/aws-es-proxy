@@ -6,9 +6,9 @@ toolchain go1.25.5
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.0
-	github.com/aws/aws-sdk-go-v2/config v1.32.4
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.4
-	github.com/aws/aws-sdk-go-v2/service/sts v1.41.4
+	github.com/aws/aws-sdk-go-v2/config v1.32.5
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.5
+	github.com/aws/aws-sdk-go-v2/service/sts v1.41.5
 	go.mongodb.org/mongo-driver/v2 v2.4.0
 	go.uber.org/zap v1.27.1
 	golang.org/x/net v0.48.0
