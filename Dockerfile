@@ -1,4 +1,4 @@
-FROM golang:1.25.5-alpine AS builder
+FROM golang:1.25.6-alpine AS builder
 
 WORKDIR /go/src/github.com/larivierec/aws-es-proxy
 COPY . .
@@ -21,7 +21,7 @@ ENV CGO_ENABLED=0 \
 RUN go mod download
 RUN go build -ldflags "-s -w -X main.Version=${VERSION} -X main.Gitsha=${REVISION}" -o aws-es-proxy aws-es-proxy.go
 
-FROM alpine:3.23
+FROM alpine:3.23.2
 LABEL name="aws-es-proxy" \
       version="latest"
 
