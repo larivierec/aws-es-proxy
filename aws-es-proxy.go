@@ -228,6 +228,30 @@ func (p *proxy) getSigner() *signer.Signer {
 	return signer.NewSigner()
 }
 
+func (p *proxy) validateRequestURL(reqURL *url.URL) error {
+	if reqURL.Scheme != p.scheme {
+		return fmt.Errorf("invalid scheme: expected %s, got %s", p.scheme, reqURL.Scheme)
+	}
+
+	if reqURL.Host != p.host {
+		return fmt.Errorf("invalid host: expected %s, got %s", p.host, reqURL.Host)
+	}
+
+	hostname := reqURL.Hostname()
+	if strings.HasPrefix(hostname, "127.") ||
+		strings.HasPrefix(hostname, "localhost") ||
+		strings.HasPrefix(hostname, "10.") ||
+		strings.HasPrefix(hostname, "172.16.") ||
+		strings.HasPrefix(hostname, "192.168.") ||
+		hostname == "::1" {
+		if p.host != reqURL.Host {
+			return fmt.Errorf("access to internal addresses is not allowed")
+		}
+	}
+
+	return nil
+}
+
 func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if p.remoteTerminate && r.URL.Path == "/terminate-proxy" && r.Method == http.MethodPost {
 		logger.Info("Terminate Signal")
@@ -273,6 +297,12 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	addHeaders(r.Header, req.Header)
+
+	if err := p.validateRequestURL(req.URL); err != nil {
+		logger.With("error", err).Error("Invalid request URL detected.")
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
 
 	// Make signV4 optional
 	if !p.noSignReq {
