@@ -1,4 +1,4 @@
-FROM golang:1.25.7-alpine AS builder
+FROM golang:1.26.0-alpine AS builder
 
 WORKDIR /go/src/github.com/larivierec/aws-es-proxy
 COPY . .
