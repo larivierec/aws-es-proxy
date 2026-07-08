@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.44.0
 	go.mongodb.org/mongo-driver/v2 v2.7.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/net v0.56.0
+	golang.org/x/net v0.57.0
 )
 
 require (
