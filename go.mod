@@ -1,6 +1,6 @@
 module github.com/larivierec/aws-es-proxy
 
-go 1.25.0
+go 1.26.0
 
 toolchain go1.27.1
 
@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.49.0
 	go.mongodb.org/mongo-driver/v2 v2.9.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/net v0.58.0
+	golang.org/x/net v0.59.0
 )
 
 require (
