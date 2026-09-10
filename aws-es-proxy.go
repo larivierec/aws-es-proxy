@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	signer "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
@@ -80,6 +81,7 @@ type responseStruct struct {
 type proxy struct {
 	scheme          string
 	host            string
+	targetURL       *url.URL
 	region          string
 	service         string
 	endpoint        string
@@ -165,6 +167,10 @@ func (p *proxy) parseEndpoint() error {
 	// Update proxy struct
 	p.scheme = link.Scheme
 	p.host = link.Host
+	p.targetURL = &url.URL{
+		Scheme: link.Scheme,
+		Host:   link.Host,
+	}
 
 	// AWS SignV4 enabled, extract required parts for signing process
 	if !p.noSignReq {
@@ -229,6 +235,10 @@ func (p *proxy) getSigner() *signer.Signer {
 }
 
 func (p *proxy) validateRequestURL(reqURL *url.URL) error {
+	if reqURL == nil {
+		return fmt.Errorf("request URL is nil")
+	}
+
 	if reqURL.Scheme != p.scheme {
 		return fmt.Errorf("invalid scheme: expected %s, got %s", p.scheme, reqURL.Scheme)
 	}
@@ -247,6 +257,79 @@ func (p *proxy) validateRequestURL(reqURL *url.URL) error {
 		if p.host != reqURL.Host {
 			return fmt.Errorf("access to internal addresses is not allowed")
 		}
+	}
+
+	return nil
+}
+
+func validateRawPath(rawPath string) error {
+	if rawPath == "" || !strings.HasPrefix(rawPath, "/") {
+		return fmt.Errorf("path must start with /")
+	}
+	if len(rawPath) > 2048 || !utf8.ValidString(rawPath) {
+		return fmt.Errorf("invalid path length or encoding")
+	}
+	if strings.ContainsAny(rawPath, "\\\x00\r\n@") || strings.Contains(rawPath, "://") {
+		return fmt.Errorf("invalid path characters")
+	}
+
+	decoded := rawPath
+	for range 2 {
+		var err error
+		decoded, err = url.PathUnescape(decoded)
+		if err != nil {
+			return fmt.Errorf("invalid path encoding")
+		}
+		if strings.ContainsAny(decoded, "\x00\r\n") {
+			return fmt.Errorf("invalid path characters")
+		}
+		if strings.Contains(decoded, "..") {
+			return fmt.Errorf("path traversal is not allowed")
+		}
+	}
+
+	return nil
+}
+
+func validateRawQuery(rawQuery string) error {
+	if len(rawQuery) > 8192 || !utf8.ValidString(rawQuery) {
+		return fmt.Errorf("invalid query length or encoding")
+	}
+	if strings.ContainsAny(rawQuery, "\x00\r\n<>") || strings.Contains(rawQuery, "@") {
+		return fmt.Errorf("invalid query characters")
+	}
+
+	decoded := rawQuery
+	for range 2 {
+		var err error
+		decoded, err = url.QueryUnescape(decoded)
+		if err != nil {
+			return fmt.Errorf("invalid query encoding")
+		}
+		if strings.ContainsAny(decoded, "\x00\r\n<>") || strings.Contains(decoded, "://") {
+			return fmt.Errorf("invalid query value")
+		}
+	}
+
+	return nil
+}
+
+func validateCleanedPath(cleanedPath string) error {
+	if cleanedPath == "" || !strings.HasPrefix(cleanedPath, "/") || strings.Contains(cleanedPath, "//") {
+		return fmt.Errorf("invalid normalized path")
+	}
+	if strings.Contains(cleanedPath, "..") || strings.ContainsAny(cleanedPath, "\\?#=") {
+		return fmt.Errorf("invalid normalized path")
+	}
+
+	for _, char := range cleanedPath {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			strings.ContainsRune("/_-.*", char) {
+			continue
+		}
+		return fmt.Errorf("invalid character in normalized path")
 	}
 
 	return nil
@@ -285,20 +368,42 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 
-	proxied := *r.URL
-	proxied.Host = p.host
-	proxied.Scheme = p.scheme
-	proxied.Path = path.Clean(proxied.Path)
+	if err := validateRawPath(r.URL.EscapedPath()); err != nil {
+		logger.With("error", err).Error("Invalid request path detected.")
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if err := validateRawQuery(r.URL.RawQuery); err != nil {
+		logger.With("error", err).Error("Invalid request query detected.")
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
 
-	if req, err = http.NewRequest(r.Method, proxied.String(), r.Body); err != nil {
+	cleanedPath := path.Clean(r.URL.Path)
+	if err := validateCleanedPath(cleanedPath); err != nil {
+		logger.With("error", err).Error("Invalid normalized request path detected.")
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// The configured endpoint is the only source for the outbound authority.
+	if p.targetURL == nil {
+		logger.Error("Configured endpoint is not initialized")
+		http.Error(w, "Proxy endpoint is not configured", http.StatusInternalServerError)
+		return
+	}
+	if req, err = http.NewRequest(r.Method, p.targetURL.String(), r.Body); err != nil {
 		logger.With("error", err).Error("Failed creating new request.")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	req.URL.Path = cleanedPath
+	req.URL.RawQuery = r.URL.RawQuery
+	proxied := *req.URL
 
 	addHeaders(r.Header, req.Header)
 
-	if err := p.validateRequestURL(req.URL); err != nil {
+	if err := p.validateRequestURL(&proxied); err != nil {
 		logger.With("error", err).Error("Invalid request URL detected.")
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
