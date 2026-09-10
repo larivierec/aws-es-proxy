@@ -81,6 +81,7 @@ type responseStruct struct {
 type proxy struct {
 	scheme          string
 	host            string
+	targetURL       *url.URL
 	region          string
 	service         string
 	endpoint        string
@@ -166,6 +167,10 @@ func (p *proxy) parseEndpoint() error {
 	// Update proxy struct
 	p.scheme = link.Scheme
 	p.host = link.Host
+	p.targetURL = &url.URL{
+		Scheme: link.Scheme,
+		Host:   link.Host,
+	}
 
 	// AWS SignV4 enabled, extract required parts for signing process
 	if !p.noSignReq {
@@ -381,9 +386,13 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build the request from the configured origin. Only the validated
-	// Elasticsearch path and query are taken from the incoming request.
-	if req, err = http.NewRequest(r.Method, p.scheme+"://"+p.host, r.Body); err != nil {
+	// The configured endpoint is the only source for the outbound authority.
+	if p.targetURL == nil {
+		logger.Error("Configured endpoint is not initialized")
+		http.Error(w, "Proxy endpoint is not configured", http.StatusInternalServerError)
+		return
+	}
+	if req, err = http.NewRequest(r.Method, p.targetURL.String(), r.Body); err != nil {
 		logger.With("error", err).Error("Failed creating new request.")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

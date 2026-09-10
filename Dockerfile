@@ -25,7 +25,8 @@ FROM alpine:3.24.1
 LABEL name="aws-es-proxy" \
       version="latest"
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache upgrade && \
+      apk --no-cache add ca-certificates
 WORKDIR /home/
 COPY --from=builder /go/src/github.com/larivierec/aws-es-proxy/aws-es-proxy /usr/local/bin/
 
