@@ -1,6 +1,6 @@
 module github.com/larivierec/aws-es-proxy
 
-go 1.26.0
+go 1.27.2
 
 toolchain go1.27.2
 
